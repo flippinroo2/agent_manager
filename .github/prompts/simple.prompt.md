@@ -23,3 +23,23 @@ We need to create a ".claude/command/stop.md" that allows you the agent to run "
 If "make kill" doesn't exist, please create it and ensure it kills everything related to this project.
 
 ---
+
+Okay, on the http://localhost:3000/admin/general page under the "Chat" tab there are options for LLM providers. I need you to add an Ollama provider that uses best practices and standard ports.
+
+Have a menu option that requests available models from Ollama and then lets me choose which one to use.
+
+---
+
+How can I enhance this app so it has access to the filesystem. I want a "prototype" folder to be created and then the application have the ability to create files in that directory.
+
+---
+
+The file wasn't actually created. Can you figure out why? Please open the browser and enter text into the prompt and check Ollama logs to figure it out.
+
+Keep going until you figure it out.
+
+---
+
+Are the agents always going to make files in that directory?
+
+---

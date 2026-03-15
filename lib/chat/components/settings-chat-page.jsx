@@ -10,6 +10,8 @@ import {
   updateCustomProvider,
   removeCustomProvider,
   setActiveLlm,
+  fetchOllamaModels,
+  setOllamaBaseUrl,
 } from '../actions.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -100,9 +102,13 @@ function ActiveConfig({ settings, onSave }) {
   if (settings?.builtinProviders && settings?.credentialStatuses) {
     const statusMap = new Map(settings.credentialStatuses.map((s) => [s.key, s.isSet]));
     for (const [slug, prov] of Object.entries(settings.builtinProviders)) {
-      const hasKey = prov.credentials.some((c) => statusMap.get(c.key));
-      if (hasKey) {
-        availableProviders.push({ slug, name: prov.name, models: prov.models });
+      if (prov.noKeyRequired) {
+        availableProviders.push({ slug, name: prov.name, models: prov.models, dynamicModels: prov.dynamicModels });
+      } else {
+        const hasKey = prov.credentials.some((c) => statusMap.get(c.key));
+        if (hasKey) {
+          availableProviders.push({ slug, name: prov.name, models: prov.models });
+        }
       }
     }
   }
@@ -113,6 +119,8 @@ function ActiveConfig({ settings, onSave }) {
   }
 
   const selectedBuiltin = settings?.builtinProviders?.[provider];
+  const selectedProviderInfo = availableProviders.find((p) => p.slug === provider);
+  const isDynamicModels = selectedProviderInfo?.dynamicModels;
 
   const handleProviderChange = (slug) => {
     setProvider(slug);
@@ -166,7 +174,13 @@ function ActiveConfig({ settings, onSave }) {
 
         <div className="flex items-center justify-between py-3">
           <label className="text-sm font-medium shrink-0">Model</label>
-          {selectedBuiltin ? (
+          {isDynamicModels ? (
+            <OllamaModelSelector
+              model={model}
+              onModelChange={handleModelChange}
+              baseUrl={settings?.active?.ollamaBaseUrl}
+            />
+          ) : selectedBuiltin ? (
             <select
               value={model}
               onChange={(e) => handleModelChange(e.target.value)}
@@ -271,6 +285,11 @@ export function ChatProvidersPage() {
     await loadSettings();
   };
 
+  const handleSaveOllamaBaseUrl = async (baseUrl) => {
+    await setOllamaBaseUrl(baseUrl);
+    await loadSettings();
+  };
+
   const openAdd = () => {
     setEditingProvider(null);
     setShowDialog(true);
@@ -305,15 +324,23 @@ export function ChatProvidersPage() {
       {settings?.builtinProviders && (
         <div className="space-y-3 mb-6">
           <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Built-in</h4>
-          {Object.entries(settings.builtinProviders).map(([slug, prov]) => (
-            <ProviderCard
-              key={slug}
-              name={prov.name}
-              credentials={prov.credentials}
-              credentialStatuses={settings.credentialStatuses || []}
-              onUpdateCredential={handleUpdateCredential}
-            />
-          ))}
+          {Object.entries(settings.builtinProviders).map(([slug, prov]) =>
+            prov.noKeyRequired ? (
+              <OllamaProviderCard
+                key={slug}
+                settings={settings}
+                onSaveBaseUrl={handleSaveOllamaBaseUrl}
+              />
+            ) : (
+              <ProviderCard
+                key={slug}
+                name={prov.name}
+                credentials={prov.credentials}
+                credentialStatuses={settings.credentialStatuses || []}
+                onUpdateCredential={handleUpdateCredential}
+              />
+            )
+          )}
         </div>
       )}
 
@@ -468,6 +495,185 @@ function CustomProviderCard({ provider, onEdit, onRemove }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Ollama components
+// ─────────────────────────────────────────────────────────────────────────────
+
+function OllamaModelSelector({ model, onModelChange, baseUrl }) {
+  const [models, setModels] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const fetched = useRef(false);
+
+  const doFetch = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const result = await fetchOllamaModels(baseUrl);
+    setLoading(false);
+    if (result.error) {
+      setError(result.error);
+      setModels([]);
+    } else {
+      setModels(result.models || []);
+      if (!model && result.models?.length > 0) {
+        onModelChange(result.models[0].id);
+      }
+    }
+  }, [baseUrl, model, onModelChange]);
+
+  useEffect(() => {
+    if (!fetched.current) {
+      fetched.current = true;
+      doFetch();
+    }
+  }, [doFetch]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">Loading models...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-destructive max-w-32 truncate" title={error}>{error}</span>
+        <button
+          onClick={doFetch}
+          className="rounded-md px-2 py-1 text-xs font-medium border border-border text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (models.length === 0) {
+    return (
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={model}
+          onChange={(e) => onModelChange(e.target.value)}
+          placeholder="llama3.2"
+          className="w-32 rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-foreground"
+        />
+        <button
+          onClick={doFetch}
+          className="rounded-md px-2 py-1 text-xs font-medium border border-border text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
+        >
+          Fetch
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        value={model}
+        onChange={(e) => onModelChange(e.target.value)}
+        className="w-40 rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-foreground"
+      >
+        {models.map((m) => (
+          <option key={m.id} value={m.id}>{m.name}</option>
+        ))}
+      </select>
+      <button
+        onClick={doFetch}
+        className="rounded-md px-2 py-1 text-xs font-medium border border-border text-muted-foreground hover:text-foreground transition-colors"
+        title="Refresh models"
+      >
+        ↻
+      </button>
+    </div>
+  );
+}
+
+function OllamaProviderCard({ settings, onSaveBaseUrl }) {
+  const [baseUrl, setBaseUrl] = useState(settings?.active?.ollamaBaseUrl || 'http://localhost:11434');
+  const [status, setStatus] = useState(null);
+  const [checking, setChecking] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const checkConnection = async () => {
+    setChecking(true);
+    const result = await fetchOllamaModels(baseUrl);
+    setChecking(false);
+    if (result.error) {
+      setStatus({ ok: false, message: result.error });
+    } else {
+      setStatus({ ok: true, message: `Connected — ${result.models.length} model${result.models.length !== 1 ? 's' : ''} available` });
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    await onSaveBaseUrl(baseUrl);
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  useEffect(() => {
+    checkConnection();
+  }, []);
+
+  return (
+    <div>
+      <h3 className="text-sm font-medium mb-2">Ollama</h3>
+      <div className="rounded-lg border bg-card p-4">
+        <div className="divide-y divide-border">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between py-3 first:pt-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">Base URL</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                className="w-56 rounded-md border border-border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-foreground"
+              />
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="rounded-md px-2.5 py-1.5 text-xs font-medium border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                {saving ? '...' : saved ? '✓' : 'Save'}
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between py-3 last:pb-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">Status</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {checking ? (
+                <span className="text-xs text-muted-foreground">Checking...</span>
+              ) : status ? (
+                <span className={`text-xs ${status.ok ? 'text-green-500' : 'text-destructive'}`}>
+                  {status.ok ? '●' : '○'} {status.message}
+                </span>
+              ) : null}
+              <button
+                onClick={checkConnection}
+                disabled={checking}
+                className="rounded-md px-2.5 py-1.5 text-xs font-medium border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                Test
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CustomProviderDialog({ open, initial, onSave, onCancel }) {
   const [name, setName] = useState(initial?.name || '');
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl || '');
@@ -589,6 +795,11 @@ export function ChatLlmPage() {
     await loadSettings();
   };
 
+  const handleSaveOllamaBaseUrl = async (baseUrl) => {
+    await setOllamaBaseUrl(baseUrl);
+    await loadSettings();
+  };
+
   const openAdd = () => { setEditingProvider(null); setShowDialog(true); };
   const openEdit = (provider) => { setEditingProvider(provider); setShowDialog(true); };
   const closeDialog = () => { setShowDialog(false); setEditingProvider(null); };
@@ -622,15 +833,23 @@ export function ChatLlmPage() {
         {settings?.builtinProviders && (
           <div className="space-y-3 mb-6">
             <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Built-in</h4>
-            {Object.entries(settings.builtinProviders).map(([slug, prov]) => (
-              <ProviderCard
-                key={slug}
-                name={prov.name}
-                credentials={prov.credentials}
-                credentialStatuses={settings.credentialStatuses || []}
-                onUpdateCredential={handleUpdateCredential}
-              />
-            ))}
+            {Object.entries(settings.builtinProviders).map(([slug, prov]) =>
+              prov.noKeyRequired ? (
+                <OllamaProviderCard
+                  key={slug}
+                  settings={settings}
+                  onSaveBaseUrl={handleSaveOllamaBaseUrl}
+                />
+              ) : (
+                <ProviderCard
+                  key={slug}
+                  name={prov.name}
+                  credentials={prov.credentials}
+                  credentialStatuses={settings.credentialStatuses || []}
+                  onUpdateCredential={handleUpdateCredential}
+                />
+              )
+            )}
           </div>
         )}
 

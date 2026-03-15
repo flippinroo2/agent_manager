@@ -50,7 +50,7 @@ dev: install ensure-data ensure-web-links
 # Symlink project root files into web/ so Next.js dev server
 # (which runs from web/ with cwd=web/) can resolve .env, data/, config/ etc.
 ensure-web-links:
-	@for item in .env data config skills logs cron triggers node_modules CLAUDE.md; do \
+	@for item in .env data config skills logs cron triggers node_modules prototype CLAUDE.md; do \
 		if [ -e "$$item" ] && [ ! -e "web/$$item" ]; then \
 			ln -sf "../$$item" "web/$$item"; \
 			echo "  🔗 web/$$item → ../$$item"; \
@@ -62,7 +62,7 @@ ensure-web-links:
 	fi
 
 ensure-data:
-	@mkdir -p data
+	@mkdir -p data prototype
 	@if [ ! -f .env ]; then \
 		echo "⚠️  No .env file found — creating from template..."; \
 		cp templates/.env.example .env; \

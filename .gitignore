@@ -67,3 +67,5 @@ web/cron
 web/triggers
 web/node_modules
 web/CLAUDE.md
+# Prototype sandbox
+prototype/

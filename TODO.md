@@ -9,3 +9,12 @@
 - [x] Fix drizzle.config.js for Drizzle Studio
 - [x] Add dev symlink setup for web/ directory
 - [x] Update CLAUDE.md with local dev workflow documentation
+- [x] Add make kill command and .claude/commands/stop.md
+- [x] Add Ollama LLM provider backend (llm-providers, model, config, actions)
+- [x] Add Ollama provider UI (dynamic model selector, provider card with base URL + status)
+- [x] Verify Ollama UI renders correctly in admin settings
+- [x] Add filesystem tools to chat agent (create_file, read_file, list_files, delete_file)
+- [x] Sandbox filesystem tools to prototype/ directory
+- [x] Add prototype/ to ensure-data and ensure-web-links in Makefile
+- [ ] Test read_file, list_files, and delete_file tools via chat
+- [ ] Add write_file tool (overwrite/append to existing files)
