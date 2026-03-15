@@ -1,0 +1,4 @@
+- [ ] Add Qdrant vector DB startup to Makefile when vector search is needed
+- [ ] Add Docker-based dev mode (make docker-up) with hot reload support
+- [ ] Add make lint command when linting is configured
+- [ ] Add make test command when test suite is created
