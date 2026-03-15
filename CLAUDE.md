@@ -82,6 +82,37 @@ Exports defined in `package.json` `exports` field. Pattern: `thepopebot/{module}
 
 Settings/admin pages use shared components from `lib/chat/components/settings-shared.jsx`. See `lib/chat/components/CLAUDE.md` for the full UI standards (button tiers, dialogs, save feedback, delete confirmation, spacing, etc.). **Follow these standards when adding new settings pages.**
 
+## Local Development
+
+Run `make` from the project root to install dependencies and start all services (Next.js + Drizzle Studio) using `concurrently`. This is the primary way to run the app locally.
+
+### Makefile Commands
+
+| Command | Description |
+|---------|-------------|
+| `make` | Install deps + start all services |
+| `make dev` | Install + run Next.js + Drizzle Studio |
+| `make web` | Start Next.js dev server only (port 3000) |
+| `make db-studio` | Start Drizzle Studio only |
+| `make db-generate` | Generate Drizzle migrations from schema |
+| `make docker-up` | Start production Docker services |
+| `make clean` | Remove build artifacts |
+| `make help` | Show all commands |
+
+### Dev Server Architecture
+
+The Next.js dev server runs from `web/` (`cd web && npx next dev`). Since `lib/paths.js` resolves ALL paths from `process.cwd()`, symlinks bridge project root files into `web/`:
+
+- `web/.env → ../.env`, `web/data → ../data`, `web/config → ../config`, etc.
+- `web/node_modules → ../node_modules` (shared deps)
+- `node_modules/thepopebot → ..` (self-reference so `node_modules/thepopebot/drizzle` resolves to `./drizzle`)
+
+These symlinks are created automatically by `make ensure-web-links` (called by `make dev`). They are git-ignored.
+
+### Webpack Externals
+
+`web/next.config.mjs` has explicit webpack `externals` for `better-sqlite3` and `bindings`. The `serverExternalPackages` config is NOT respected by Next.js's `(instrument)` webpack layer, so these externals are required to prevent webpack from bundling native Node modules.
+
 ## Build System
 
 Run `npm run build` before publish. esbuild compiles `lib/chat/components/**/*.jsx`, `lib/auth/components/**/*.jsx`, `lib/code/*.jsx`, `lib/cluster/components/**/*.jsx` to ES modules.

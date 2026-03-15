@@ -1,4 +1,4 @@
-.PHONY: all install install-deps install-concurrently build dev web db-studio db-generate docker-up docker-down docker-build clean help
+.PHONY: all install install-deps install-concurrently build dev ensure-data ensure-web-links web db-studio db-generate docker-up docker-down docker-build kill clean help
 
 # Default: install everything and start all services
 all: install dev
@@ -15,7 +15,7 @@ install-deps:
 	@npm install
 
 install-concurrently:
-	@if ! npx --no concurrently --version > /dev/null 2>&1; then \
+	@if ! node -e "require('concurrently')" 2>/dev/null; then \
 		echo "📦 Installing concurrently..."; \
 		npm install --save-dev concurrently; \
 	else \
@@ -38,14 +38,39 @@ db-generate:
 # Development — run everything concurrently
 # ──────────────────────────────────────────────
 
-dev: install
+dev: install ensure-data ensure-web-links
 	@echo "🚀 Starting all services with concurrently..."
 	@npx concurrently \
 		--names "next,db-studio" \
 		--prefix-colors "blue,magenta" \
 		--kill-others-on-fail \
 		"cd web && npx next dev --port 3000" \
-		"npm run db:studio"
+		"npx drizzle-kit studio"
+
+# Symlink project root files into web/ so Next.js dev server
+# (which runs from web/ with cwd=web/) can resolve .env, data/, config/ etc.
+ensure-web-links:
+	@for item in .env data config skills logs cron triggers node_modules CLAUDE.md; do \
+		if [ -e "$$item" ] && [ ! -e "web/$$item" ]; then \
+			ln -sf "../$$item" "web/$$item"; \
+			echo "  🔗 web/$$item → ../$$item"; \
+		fi; \
+	done
+	@if [ ! -e "node_modules/thepopebot" ]; then \
+		ln -sf .. "node_modules/thepopebot"; \
+		echo "  🔗 node_modules/thepopebot → .. (self-reference for dev)"; \
+	fi
+
+ensure-data:
+	@mkdir -p data
+	@if [ ! -f .env ]; then \
+		echo "⚠️  No .env file found — creating from template..."; \
+		cp templates/.env.example .env; \
+		AUTH_SECRET=$$(openssl rand -base64 32); \
+		sed -i '' "s|^AUTH_SECRET=$$|AUTH_SECRET=$$AUTH_SECRET|" .env; \
+		echo "✅ .env created with generated AUTH_SECRET"; \
+		echo "   Edit .env to add your API keys (ANTHROPIC_API_KEY, GH_TOKEN, etc.)"; \
+	fi
 
 # Individual services (for running standalone)
 web:
@@ -82,6 +107,13 @@ clean:
 	@rm -rf node_modules/.cache
 	@echo "✅ Clean complete"
 
+kill:
+	@echo "🛑 Stopping all thepopebot services..."
+	@-pkill -f "next dev --port 3000" 2>/dev/null && echo "  Stopped Next.js dev server" || true
+	@-pkill -f "drizzle-kit studio" 2>/dev/null && echo "  Stopped Drizzle Studio" || true
+	@-pkill -f "concurrently.*next.*drizzle" 2>/dev/null && echo "  Stopped concurrently" || true
+	@echo "✅ All services stopped"
+
 help:
 	@echo ""
 	@echo "  thepopebot — Makefile Commands"
@@ -97,6 +129,7 @@ help:
 	@echo "  make docker-up    Start production Docker services"
 	@echo "  make docker-down  Stop Docker services"
 	@echo "  make docker-build Build Docker images"
+	@echo "  make kill         Stop all running thepopebot services"
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make help         Show this help"
 	@echo ""

@@ -2,3 +2,10 @@
 - [ ] Add Docker-based dev mode (make docker-up) with hot reload support
 - [ ] Add make lint command when linting is configured
 - [ ] Add make test command when test suite is created
+- [x] Create Makefile with all project commands
+- [x] Install and configure concurrently for parallel service startup
+- [x] Create .claude/commands/start.md for agent use
+- [x] Fix webpack externals for better-sqlite3/bindings in dev mode
+- [x] Fix drizzle.config.js for Drizzle Studio
+- [x] Add dev symlink setup for web/ directory
+- [x] Update CLAUDE.md with local dev workflow documentation

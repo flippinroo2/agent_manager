@@ -56,3 +56,14 @@ lib/code/*.js
 # Custom
 .lock
 artifacts
+
+# Dev symlinks in web/ (created by Makefile for local development)
+web/.env
+web/data
+web/config
+web/skills
+web/logs
+web/cron
+web/triggers
+web/node_modules
+web/CLAUDE.md
