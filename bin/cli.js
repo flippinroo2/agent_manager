@@ -51,7 +51,7 @@ Usage: thepopebot <command>
 Commands:
   init                              Scaffold a new thepopebot project
   upgrade|update [@beta|version]    Upgrade thepopebot (install, init, build, commit, push)
-  setup                             Run interactive setup wizard
+  setup [--local|--no-github]       Run interactive setup wizard
   setup-ssl                         Configure SSL with Let's Encrypt wildcard cert
   reset-auth                        Regenerate AUTH_SECRET (invalidates all sessions)
   reset [file]                      Restore a template file (or list available templates)
@@ -788,7 +788,7 @@ async function resetAll() {
 function setup() {
   const setupScript = path.join(__dirname, '..', 'setup', 'setup.mjs');
   try {
-    execFileSync(process.execPath, [setupScript], { stdio: 'inherit', cwd: process.cwd() });
+    execFileSync(process.execPath, [setupScript, ...args], { stdio: 'inherit', cwd: process.cwd() });
   } catch {
     process.exit(1);
   }

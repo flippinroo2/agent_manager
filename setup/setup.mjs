@@ -45,6 +45,7 @@ async function main() {
   console.log(chalk.cyan(logo));
   clack.intro('Interactive Setup Wizard');
 
+  const localOnly = process.argv.includes('--local') || process.argv.includes('--no-github');
   const TOTAL_STEPS = 5;
   let currentStep = 0;
 
@@ -99,36 +100,40 @@ async function main() {
   }
   clack.log.success('Git installed');
 
-  // gh CLI
-  if (prereqs.gh.installed) {
-    if (prereqs.gh.authenticated) {
-      clack.log.success('GitHub CLI authenticated');
-    } else {
-      clack.log.warn('GitHub CLI installed but not authenticated');
-      const shouldAuth = await confirm('Run gh auth login now?');
-      if (shouldAuth) {
-        try {
-          runGhAuth();
-          clack.log.success('GitHub CLI authenticated');
-        } catch {
-          clack.log.error('Failed to authenticate gh CLI');
+  if (localOnly) {
+    clack.log.info('Local mode enabled: skipping GitHub CLI authentication and GitHub setup.');
+  } else {
+    // gh CLI
+    if (prereqs.gh.installed) {
+      if (prereqs.gh.authenticated) {
+        clack.log.success('GitHub CLI authenticated');
+      } else {
+        clack.log.warn('GitHub CLI installed but not authenticated');
+        const shouldAuth = await confirm('Run gh auth login now?');
+        if (shouldAuth) {
+          try {
+            runGhAuth();
+            clack.log.success('GitHub CLI authenticated');
+          } catch {
+            clack.log.error('Failed to authenticate gh CLI');
+            process.exit(1);
+          }
+        } else {
+          clack.log.error('GitHub CLI authentication required');
           process.exit(1);
         }
-      } else {
-        clack.log.error('GitHub CLI authentication required');
-        process.exit(1);
       }
+    } else {
+      clack.log.error('GitHub CLI (gh) not found');
+      const installCmd = process.platform === 'darwin'
+        ? 'brew install gh'
+        : process.platform === 'win32'
+          ? 'winget install GitHub.cli'
+          : 'sudo apt install gh  (or see https://github.com/cli/cli#installation)';
+      clack.log.info(`Install the GitHub CLI, then re-run setup:\n\n  ${installCmd}\n`);
+      clack.cancel('Missing prerequisite: gh CLI');
+      process.exit(1);
     }
-  } else {
-    clack.log.error('GitHub CLI (gh) not found');
-    const installCmd = process.platform === 'darwin'
-      ? 'brew install gh'
-      : process.platform === 'win32'
-        ? 'winget install GitHub.cli'
-        : 'sudo apt install gh  (or see https://github.com/cli/cli#installation)';
-    clack.log.info(`Install the GitHub CLI, then re-run setup:\n\n  ${installCmd}\n`);
-    clack.cancel('Missing prerequisite: gh CLI');
-    process.exit(1);
   }
 
   // Initialize git repo if needed
@@ -140,16 +145,21 @@ async function main() {
   }
 
   // Set git identity from GitHub if not configured
-  try { execSync('git config user.name', { stdio: 'ignore' }); } catch {
-    try {
-      const ghUser = JSON.parse(execSync('gh api user', { encoding: 'utf-8', env: ghEnv() }));
-      execSync(`git config --global user.name "${ghUser.name || ghUser.login}"`, { stdio: 'ignore' });
-      execSync(`git config --global user.email "${ghUser.login}@users.noreply.github.com"`, { stdio: 'ignore' });
-      clack.log.success('Git identity set from GitHub');
-    } catch {}
+  if (!localOnly) {
+    try { execSync('git config user.name', { stdio: 'ignore' }); } catch {
+      try {
+        const ghUser = JSON.parse(execSync('gh api user', { encoding: 'utf-8', env: ghEnv() }));
+        execSync(`git config --global user.name "${ghUser.name || ghUser.login}"`, { stdio: 'ignore' });
+        execSync(`git config --global user.email "${ghUser.login}@users.noreply.github.com"`, { stdio: 'ignore' });
+        clack.log.success('Git identity set from GitHub');
+      } catch {}
+    }
   }
 
-  if (prereqs.git.remoteInfo) {
+  if (localOnly) {
+    owner = env?.GH_OWNER || null;
+    repo = env?.GH_REPO || null;
+  } else if (prereqs.git.remoteInfo) {
     owner = prereqs.git.remoteInfo.owner;
     repo = prereqs.git.remoteInfo.repo;
     clack.log.success(`Repository: ${owner}/${repo}`);
@@ -235,15 +245,19 @@ async function main() {
   }
 
   // Add owner/repo to collected
-  collected.GH_OWNER = owner;
-  collected.GH_REPO = repo;
+  if (!localOnly) {
+    collected.GH_OWNER = owner;
+    collected.GH_REPO = repo;
+  }
 
   // Track whether we need to push after getting the PAT
   let needsPush = false;
-  try {
-    execSync('git rev-parse --verify origin/main', { stdio: 'ignore' });
-  } catch {
-    needsPush = true;
+  if (!localOnly) {
+    try {
+      execSync('git rev-parse --verify origin/main', { stdio: 'ignore' });
+    } catch {
+      needsPush = true;
+    }
   }
 
   // Docker check (informational — needed for server start)
@@ -266,9 +280,32 @@ async function main() {
     clack.log.warn(`Database init: ${err.message}`);
   }
 
+  const composeFile = path.join(process.cwd(), 'docker-compose.yml');
+  if (!fs.existsSync(composeFile)) {
+    const templateCompose = path.join(process.cwd(), 'templates', 'docker-compose.yml');
+    if (fs.existsSync(templateCompose)) {
+      fs.copyFileSync(templateCompose, composeFile);
+      clack.log.success('Created docker-compose.yml from template');
+    } else {
+      clack.log.warn('docker-compose.yml is missing. Run `node bin/cli.js init --no-install` before starting Docker.');
+    }
+  }
+
+  const litellmConfig = path.join(process.cwd(), 'event-handler', 'litellm', 'main.yaml');
+  if (!fs.existsSync(litellmConfig)) {
+    const templateLiteLlmConfig = path.join(process.cwd(), 'templates', 'event-handler', 'litellm', 'main.yaml');
+    if (fs.existsSync(templateLiteLlmConfig)) {
+      fs.mkdirSync(path.dirname(litellmConfig), { recursive: true });
+      fs.copyFileSync(templateLiteLlmConfig, litellmConfig);
+      clack.log.success('Created event-handler/litellm/main.yaml from template');
+    }
+  }
+
+  const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
+  collected.THEPOPEBOT_VERSION = pkg.version;
+
   // ─── Step 2: GitHub PAT ──────────────────────────────────────────────
   clack.log.step(`[${++currentStep}/${TOTAL_STEPS}] GitHub Personal Access Token`);
-  clack.log.info('Your agent needs permission to create branches and pull requests in your GitHub repo. A Personal Access Token (PAT) grants this access.');
 
   // Check DB first for existing GH_TOKEN, then fall back to .env
   let existingGhToken = null;
@@ -279,56 +316,62 @@ async function main() {
   if (!existingGhToken) existingGhToken = env?.GH_TOKEN || null;
 
   let pat = null;
-  if (await keepOrReconfigure('GitHub PAT', existingGhToken ? maskSecret(existingGhToken) : null)) {
-    pat = existingGhToken;
-  }
+  if (localOnly) {
+    clack.log.info('Local mode enabled: skipping GitHub PAT setup.');
+  } else {
+    clack.log.info('Your agent needs permission to create branches and pull requests in your GitHub repo. A Personal Access Token (PAT) grants this access.');
 
-  if (!pat) {
-    clack.log.info(
-      `Create a fine-grained PAT scoped to ${owner}/${repo} only:\n` +
-      `  Repository access: Only select repositories > ${owner}/${repo}\n` +
-      '  Actions: Read and write\n' +
-      '  Administration: Read and write (required for self-hosted runners)\n' +
-      '  Contents: Read and write\n' +
-      '  Metadata: Read-only (required, auto-selected)\n' +
-      '  Pull requests: Read and write\n' +
-      '  Secrets: Read and write\n' +
-      '  Variables: Read and write\n' +
-      '  Workflows: Read and write'
-    );
-
-    await openOrShowURL(getPATCreationURL(), 'GitHub PAT creation page');
-
-    let patValid = false;
-    while (!patValid) {
-      pat = await promptForPAT();
-
-      const validateSpinner = clack.spinner();
-      validateSpinner.start('Validating PAT...');
-      const validation = await validatePAT(pat);
-
-      if (!validation.valid) {
-        validateSpinner.stop(`Invalid PAT: ${validation.error}`);
-        continue;
-      }
-
-      const scopes = await checkPATScopes(pat);
-      if (!scopes.hasRepo || !scopes.hasWorkflow) {
-        validateSpinner.stop('PAT missing required scopes');
-        clack.log.info(`Found scopes: ${scopes.scopes.join(', ') || 'none'}`);
-        continue;
-      }
-
-      if (scopes.isFineGrained) {
-        validateSpinner.stop(`Fine-grained PAT valid for user: ${validation.user}`);
-      } else {
-        validateSpinner.stop(`PAT valid for user: ${validation.user}`);
-      }
-      patValid = true;
+    if (await keepOrReconfigure('GitHub PAT', existingGhToken ? maskSecret(existingGhToken) : null)) {
+      pat = existingGhToken;
     }
-  }
 
-  collected.GH_TOKEN = pat;
+    if (!pat) {
+      clack.log.info(
+        `Create a fine-grained PAT scoped to ${owner}/${repo} only:\n` +
+        `  Repository access: Only select repositories > ${owner}/${repo}\n` +
+        '  Actions: Read and write\n' +
+        '  Administration: Read and write (required for self-hosted runners)\n' +
+        '  Contents: Read and write\n' +
+        '  Metadata: Read-only (required, auto-selected)\n' +
+        '  Pull requests: Read and write\n' +
+        '  Secrets: Read and write\n' +
+        '  Variables: Read and write\n' +
+        '  Workflows: Read and write'
+      );
+
+      await openOrShowURL(getPATCreationURL(), 'GitHub PAT creation page');
+
+      let patValid = false;
+      while (!patValid) {
+        pat = await promptForPAT();
+
+        const validateSpinner = clack.spinner();
+        validateSpinner.start('Validating PAT...');
+        const validation = await validatePAT(pat);
+
+        if (!validation.valid) {
+          validateSpinner.stop(`Invalid PAT: ${validation.error}`);
+          continue;
+        }
+
+        const scopes = await checkPATScopes(pat);
+        if (!scopes.hasRepo || !scopes.hasWorkflow) {
+          validateSpinner.stop('PAT missing required scopes');
+          clack.log.info(`Found scopes: ${scopes.scopes.join(', ') || 'none'}`);
+          continue;
+        }
+
+        if (scopes.isFineGrained) {
+          validateSpinner.stop(`Fine-grained PAT valid for user: ${validation.user}`);
+        } else {
+          validateSpinner.stop(`PAT valid for user: ${validation.user}`);
+        }
+        patValid = true;
+      }
+    }
+
+    collected.GH_TOKEN = pat;
+  }
 
   // Push to GitHub now that we have the PAT
   if (needsPush) {
@@ -364,12 +407,20 @@ async function main() {
 
   // ─── Step 3: App URL ─────────────────────────────────────────────────
   clack.log.step(`[${++currentStep}/${TOTAL_STEPS}] App URL`);
-  clack.log.info('Your agent runs as a web server that receives notifications from GitHub when jobs finish. It needs a public URL to receive those webhooks.');
+  if (localOnly) {
+    clack.log.info('Your agent runs as a local web server. Use http://localhost unless you plan to expose it with a tunnel.');
+  } else {
+    clack.log.info('Your agent runs as a web server that receives notifications from GitHub when jobs finish. It needs a public URL to receive those webhooks.');
+  }
 
   let appUrl = null;
 
   if (await keepOrReconfigure('APP_URL', env?.APP_URL || null)) {
     appUrl = env.APP_URL;
+  }
+
+  if (!appUrl && localOnly) {
+    appUrl = 'http://localhost';
   }
 
   if (!appUrl) {
@@ -400,18 +451,20 @@ async function main() {
   collected.APP_URL = appUrl;
   collected.APP_HOSTNAME = new URL(appUrl).hostname;
 
-  // Generate GH_WEBHOOK_SECRET if not already in DB
-  let existingWebhookSecret = null;
-  try {
-    const { getConfigSecret } = await import('../lib/db/config.js');
-    existingWebhookSecret = getConfigSecret('GH_WEBHOOK_SECRET');
-  } catch {}
-  collected.GH_WEBHOOK_SECRET = existingWebhookSecret || env?.GH_WEBHOOK_SECRET || generateWebhookSecret();
+  if (!localOnly) {
+    // Generate GH_WEBHOOK_SECRET if not already in DB
+    let existingWebhookSecret = null;
+    try {
+      const { getConfigSecret } = await import('../lib/db/config.js');
+      existingWebhookSecret = getConfigSecret('GH_WEBHOOK_SECRET');
+    } catch {}
+    collected.GH_WEBHOOK_SECRET = existingWebhookSecret || env?.GH_WEBHOOK_SECRET || generateWebhookSecret();
+  }
 
   // ─── Step 4: Sync Config ─────────────────────────────────────────────
   clack.log.step(`[${++currentStep}/${TOTAL_STEPS}] Sync config`);
 
-  if (!owner || !repo) {
+  if (!localOnly && (!owner || !repo)) {
     clack.log.warn('Could not detect repository. Please enter manually.');
     const ownerInput = await clack.text({ message: 'GitHub owner/org:' });
     if (clack.isCancel(ownerInput)) { clack.cancel('Setup cancelled.'); process.exit(0); }
@@ -423,7 +476,7 @@ async function main() {
     collected.GH_REPO = repo;
   }
 
-  const report = await syncConfig(env, collected, { owner, repo });
+  const report = await syncConfig(env, collected, { owner, repo, skipGitHub: localOnly });
 
   if (report.secrets.length > 0) {
     clack.log.info(`GitHub secrets set: ${report.secrets.join(', ')}`);
@@ -437,21 +490,28 @@ async function main() {
 
   clack.log.info('Starting server...');
   try {
-    execSync('docker compose up -d', { stdio: 'inherit' });
+    const composeCommand = localOnly
+      ? 'docker compose up -d traefik event-handler litellm'
+      : 'docker compose up -d';
+    execSync(composeCommand, { stdio: 'inherit' });
     clack.log.success('Server started');
   } catch (err) {
     const output = (err.stderr || err.stdout || err.message || '').toString().trim();
     clack.log.warn('Failed to start.');
     if (output) clack.log.error(output);
-    clack.log.info('Fix the issue above, then run: docker compose up -d');
+    if (localOnly && output.includes('not found')) {
+      clack.log.info('Build the local event-handler image first: npm run docker:build -- --image event-handler');
+    }
+    clack.log.info(`Fix the issue above, then run: ${localOnly ? 'docker compose up -d traefik event-handler litellm' : 'docker compose up -d'}`);
   }
 
   // ─── Done ─────────────────────────────────────────────────────────────
 
   let summary = '';
-  summary += `Repository:   ${owner}/${repo}\n`;
   summary += `App URL:      ${appUrl}\n`;
-  summary += `GitHub PAT:   ${maskSecret(pat)}`;
+  summary += localOnly
+    ? 'GitHub:      skipped (local mode)'
+    : `Repository:   ${owner}/${repo}\nGitHub PAT:   ${maskSecret(pat)}`;
 
   clack.note(summary, 'Configuration');
 

@@ -37,6 +37,7 @@ export const CONFIG_TARGETS = {
   GH_REPO:               { env: true },
   APP_URL:               { env: true, variable: true },
   APP_HOSTNAME:          { env: true },
+  THEPOPEBOT_VERSION:    { env: true },
 
   // GitHub variables consumed by scaffolded workflows
   AUTO_MERGE:            { variable: true, default: 'true', firstRunOnly: true },

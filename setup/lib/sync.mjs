@@ -12,11 +12,12 @@ import { CONFIG_TARGETS } from './targets.mjs';
  * @param {object|null} env - Current .env values (null if no .env)
  * @param {object} collected - All collected config values
  * @param {object} options
- * @param {string} options.owner - GitHub owner
- * @param {string} options.repo - GitHub repo
+ * @param {string} [options.owner] - GitHub owner
+ * @param {string} [options.repo] - GitHub repo
+ * @param {boolean} [options.skipGitHub] - Do not sync GitHub secrets or variables
  * @returns {Promise<object>} Sync report
  */
-export async function syncConfig(env, collected, { owner, repo }) {
+export async function syncConfig(env, collected, { owner, repo, skipGitHub = false } = {}) {
   const envUpdates = [];
   const dbUpdates = [];
   const dbSecretUpdates = [];
@@ -47,13 +48,13 @@ export async function syncConfig(env, collected, { owner, repo }) {
     }
 
     // GitHub secret — only if changed AND value is non-empty
-    if (target.secret && changed && value) {
+    if (!skipGitHub && target.secret && changed && value) {
       const secretName = target.secret === true ? key : target.secret;
       secretUpdates.push({ key, secretName, value });
     }
 
     // GitHub variable — only if changed
-    if (target.variable && changed) {
+    if (!skipGitHub && target.variable && changed) {
       // Skip firstRunOnly variables unless this is the first setup
       if (target.firstRunOnly && !isFirstRun) continue;
       variableUpdates.push({ key, value });
@@ -61,7 +62,7 @@ export async function syncConfig(env, collected, { owner, repo }) {
   }
 
   // Also handle firstRunOnly defaults that aren't in collected
-  if (isFirstRun) {
+  if (!skipGitHub && isFirstRun) {
     for (const [key, target] of Object.entries(CONFIG_TARGETS)) {
       if (target.firstRunOnly && target.default && !(key in collected)) {
         variableUpdates.push({ key, value: target.default });
